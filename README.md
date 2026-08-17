@@ -129,7 +129,7 @@ No local PostgreSQL installation is required when running the project with Docke
 ## 1. Clone the repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone https://github.com/nnthach/foxy-fit-test.git
 cd foxy-fit-test
 ```
 
