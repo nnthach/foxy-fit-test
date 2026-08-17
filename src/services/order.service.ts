@@ -1,94 +1,136 @@
-import { CheckoutInput, Order, OrderItem, Product } from "../types/index.js";
+import { db } from "../db/index.js";
+import { CheckoutDto } from "../dtos/checkout.dto.js";
+import { OrderRepository } from "../repositories/order.repository.js";
+import { ProductRepository } from "../repositories/product.repository.js";
+import {
+  CheckoutItemInput,
+  MergedItem,
+  OrderItemData,
+  OrderResponse,
+} from "../types/index.js";
 import { AppError } from "../utils/AppError.js";
 
-const mockOrders: Order[] = [
-  {
-    id: 1,
-    status: "PENDING",
-    totalAmount: 2247,
-    createdAt: new Date(),
-    items: [
-      {
-        productId: 1,
-        productName: "iPhone 15 Pro",
-        quantity: 2,
-        price: 999,
-        subtotal: 1998,
-      },
-      {
-        productId: 3,
-        productName: "AirPods Pro",
-        quantity: 1,
-        price: 249,
-        subtotal: 249,
-      },
-    ],
-  },
-];
-
-const mockProducts: Product[] = [
-  { id: 1, name: "iPhone 15 Pro", price: 999, stock: 10 },
-  { id: 2, name: "Samsung Galaxy S24", price: 899, stock: 15 },
-  { id: 3, name: "AirPods Pro", price: 249, stock: 30 },
-  { id: 4, name: "MacBook Air M3", price: 1299, stock: 5 },
-  { id: 5, name: "iPad Air (Hết hàng)", price: 599, stock: 0 },
-];
-
 export class OrderService {
-  async getOrderById(id: number): Promise<Order> {
-    const order = mockOrders.find((o) => o.id === id);
+  private readonly productRepo = new ProductRepository();
+  private readonly orderRepo = new OrderRepository();
 
-    if (!order) {
-      throw new AppError(`Không tìm thấy đơn hàng với id=${id}`, 404);
+  private mergeDuplicateItems(items: CheckoutItemInput[]): MergedItem[] {
+    const map = new Map<number, number>();
+
+    for (const item of items) {
+      map.set(item.productId, (map.get(item.productId) ?? 0) + item.quantity);
     }
 
-    return order;
+    return Array.from(map.entries()).map(([productId, quantity]) => ({
+      productId,
+      quantity,
+    }));
   }
 
-  async checkout(input: CheckoutInput): Promise<Order> {
-    let totalAmount = 0;
-    const orderItems: OrderItem[] = [];
+  async getOrderById(id: number): Promise<OrderResponse> {
+    const order = await this.orderRepo.findOrderById(db, id);
 
-    for (const item of input.items) {
-      const product = mockProducts.find((p) => p.id === item.productId);
-
-      if (!product) {
-        throw new AppError(
-          `Sản phẩm với id=${item.productId} không tồn tại`,
-          400,
-        );
-      }
-
-      if (product.stock < item.quantity) {
-        throw new AppError(
-          `Sản phẩm "${product.name}" không đủ tồn kho (còn ${product.stock}, yêu cầu ${item.quantity})`,
-          400,
-        );
-      }
-
-      const subtotal = product.price * item.quantity;
-      totalAmount += subtotal;
-
-      orderItems.push({
-        productId: product.id,
-        productName: product.name,
-        quantity: item.quantity,
-        price: product.price,
-        subtotal,
-      });
-
-      product.stock -= item.quantity;
+    if (!order) {
+      throw new AppError(`Order with id=${id} not found`, 404);
     }
 
-    const newOrder: Order = {
-      id: 2,
-      status: "PENDING",
-      totalAmount,
-      createdAt: new Date(),
-      items: orderItems,
-    };
+    const items = await this.orderRepo.findOrderItemsByOrderId(db, id);
 
-    mockOrders.push(newOrder);
-    return newOrder;
+    return {
+      id: order.id,
+      status: order.status,
+      totalAmount: Number(order.totalAmount),
+      createdAt: order.createdAt,
+      items: items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        price: Number(item.price),
+        subtotal: Number(item.price) * item.quantity,
+      })),
+    };
+  }
+
+  async checkout(input: CheckoutDto): Promise<OrderResponse> {
+    // merge duplicate product by id
+    const mergedItems = this.mergeDuplicateItems(input.items).sort(
+      (a, b) => a.productId - b.productId,
+    );
+
+    // start transaction
+    return db.transaction(async (tx) => {
+      let totalAmount = 0;
+      const orderItemsData: OrderItemData[] = [];
+
+      // reverse product
+      for (const item of mergedItems) {
+        // get each product
+        const product = await this.productRepo.findByIdForUpdate(
+          tx,
+          item.productId,
+        );
+
+        // wrong id
+        if (!product) {
+          throw new AppError(
+            `Product with id=${item.productId} does not exist`,
+            400,
+          );
+        }
+
+        // check stock
+        if (product.stock < item.quantity) {
+          throw new AppError(
+            `Product "${product.name}" does not have enough stock (available: ${product.stock}, requested: ${item.quantity})`,
+            400,
+          );
+        }
+
+        // calculate price
+        const price = Number(product.price);
+        const subtotal = price * item.quantity;
+
+        totalAmount += subtotal;
+
+        orderItemsData.push({
+          productId: product.id,
+          productName: product.name,
+          quantity: item.quantity,
+          price,
+        });
+
+        // decrease stock in product table
+        await this.productRepo.decreaseStock(tx, product.id, item.quantity);
+      }
+
+      // create order table
+      const order = await this.orderRepo.createOrder(tx, totalAmount);
+
+      // create order-items table
+      for (const item of orderItemsData) {
+        await this.orderRepo.createOrderItem(
+          tx,
+          order.id,
+          item.productId,
+          item.quantity,
+          item.price,
+        );
+      }
+
+      // return result
+      return {
+        id: order.id,
+        status: order.status,
+        totalAmount,
+        createdAt: order.createdAt,
+        items: orderItemsData.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          price: item.price,
+          subtotal: item.price * item.quantity,
+        })),
+      };
+    });
   }
 }

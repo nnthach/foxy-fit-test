@@ -1,8 +1,8 @@
 import express from "express";
 import orderRoutes from "./routes/order.routes.js";
 import { errorHandler } from "./middlewares/error.middleware.js";
-import { pool } from "./config/database.js";
 import dotenv from "dotenv";
+import { pool } from "./db/index.js";
 
 dotenv.config();
 
@@ -15,9 +15,9 @@ app.get("/health/db", async (_req, res) => {
     await pool.query("SELECT 1");
     res.status(200).json({ status: "db connected" });
   } catch (error) {
-    res
-      .status(500)
-      .json({ status: "db connection failed", error: String(error) });
+    res.status(500).json({
+      status: "db connection failed",
+    });
   }
 });
 

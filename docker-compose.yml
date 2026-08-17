@@ -21,7 +21,7 @@ services:
   api: 
     build:
       context: .
-      dockerfile: Dockerfile.dev
+      dockerfile: Dockerfile
     container_name: node-api-dev
     restart: unless-stopped
     env_file:

@@ -14,14 +14,14 @@ export class OrderController {
       const orderId = Number(req.params.id);
 
       if (!Number.isInteger(orderId) || orderId <= 0) {
-        throw new AppError("id đơn hàng không hợp lệ", 400);
+        throw new AppError("Invalid id", 400);
       }
 
       const order = await this.orderService.getOrderById(orderId);
 
       res.status(200).json({ success: true, data: order });
     } catch (error) {
-      next(error); // đẩy lỗi ra middleware xử lý tập trung (bước 6)
+      next(error);
     }
   };
 
@@ -34,7 +34,7 @@ export class OrderController {
       const order = await this.orderService.checkout(req.body);
       res
         .status(201)
-        .json({ success: true, message: "Đặt hàng thành công", data: order });
+        .json({ success: true, message: "Order successfully!", data: order });
     } catch (error) {
       next(error);
     }

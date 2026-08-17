@@ -1,4 +1,9 @@
+import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
+import * as schema from "./schema/index.js";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 export const pool = new Pool({
   host: process.env.DATABASE_HOST || "localhost",
@@ -11,6 +16,8 @@ export const pool = new Pool({
 });
 
 pool.on("error", (err: Error) => {
-  console.error("Lỗi không mong muốn từ PostgreSQL client đang idle:", err);
+  console.error("Unexpected error from idle PostgreSQL client:", err);
   process.exit(1);
 });
+
+export const db = drizzle(pool, { schema });

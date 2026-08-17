@@ -10,7 +10,7 @@ export const validateCheckoutBody = (
   if (!Array.isArray(items) || items.length === 0) {
     res.status(400).json({
       success: false,
-      message: "items phải là mảng và không được rỗng",
+      message: "items must be a non-empty array",
     });
     return;
   }
@@ -23,7 +23,8 @@ export const validateCheckoutBody = (
     ) {
       res.status(400).json({
         success: false,
-        message: "Mỗi item cần productId (số) và quantity (số nguyên dương)",
+        message:
+          "Each item must have a positive integer productId and quantity",
       });
       return;
     }
